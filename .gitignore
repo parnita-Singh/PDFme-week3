@@ -19,3 +19,8 @@ samples/report.txt
 out/
 outputs/
 PDFme_check/
+inventory_canva.json
+big_objects.*
+check_*.py
+check_*.txt
+make_sample.py
