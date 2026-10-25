@@ -16,3 +16,6 @@ samples/report.txt
 *.pdf.report.json
 *.pdf.report.txt
 .DS_Store
+out/
+outputs/
+PDFme_check/
