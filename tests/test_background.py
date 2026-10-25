@@ -254,3 +254,88 @@ def test_command_line_removebg(tmp_path, capsys):
     assert code == 0
     assert out.exists()
     assert "Processed 1 image" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("text, expected", [
+    (None, None), ("", None), ("   ", None),
+    ("1:Im0", [(1, "/Im0")]),
+    ("1:/Im0, 2:Im1", [(1, "/Im0"), (2, "/Im1")]),
+])
+def test_parse_image_list(text, expected):
+    from pdftoolkit.background import parse_image_list
+
+    assert parse_image_list(text) == expected
+
+
+@pytest.mark.parametrize("text", ["Im0", "one:Im0"])
+def test_parse_image_list_rejects_bad_text(text):
+    from pdftoolkit.background import parse_image_list
+
+    with pytest.raises(ValueError):
+        parse_image_list(text)
+
+
+def test_images_option_processes_a_full_page_image(tmp_path):
+    """The banner case: a photo covering the whole page is skipped by default, but processed when named."""
+    import json
+
+    from pdftoolkit.background import main as background_main
+
+    src = make_mixed_pdf(tmp_path / "mixed.pdf")
+    report_path = tmp_path / "r.json"
+
+    assert background_main([str(src), str(tmp_path / "out.pdf"), "--images", "1:Im0",
+                            "--report", str(report_path)]) == 0
+
+    saved = json.loads(report_path.read_text(encoding="utf-8"))
+    assert row_for(saved, "/Im0")["action"] == "processed"
+    assert row_for(saved, "/Im1")["action"] == "not_processed"
+
+
+def make_91_percent_pdf(path: Path) -> Path:
+    """One page: a photo drawn over 91% of the page (the banner case)."""
+    pdf = pikepdf.Pdf.new()
+    img = subject_image(600)
+    xobj = image_xobject(pdf, jpeg_bytes(img, 95), img.width, img.height)
+    add_page(pdf, b"q 556.92 0 0 792 0 0 cm /Im0 Do Q", xobjects={"/Im0": xobj})
+    return save(pdf, path)
+
+
+def test_default_cover_limit_skips_a_91_percent_photo(tmp_path):
+    src = make_91_percent_pdf(tmp_path / "ninety_one.pdf")
+
+    report = remove_background(src, tmp_path / "out.pdf")
+
+    row = row_for(report, "/Im0")
+    assert row["action"] == "not_processed"
+    assert "skips images of 90% or more" in row["reason"]
+
+
+def test_raised_cover_limit_processes_a_91_percent_photo(tmp_path):
+    src = make_91_percent_pdf(tmp_path / "ninety_one.pdf")
+
+    report = remove_background(src, tmp_path / "out.pdf", cover_limit=0.95)
+
+    assert row_for(report, "/Im0")["action"] == "processed"
+
+
+@pytest.mark.parametrize("limit", [0, 0.0, 1.5, -0.1])
+def test_cover_limit_outside_1_to_100_percent_is_refused(tmp_path, limit):
+    src = make_subject_pdf(tmp_path / "subject.pdf")
+
+    with pytest.raises(ValueError, match="cover limit"):
+        remove_background(src, tmp_path / "out.pdf", cover_limit=limit)
+
+
+def test_command_line_cover_limit(tmp_path):
+    from pdftoolkit.background import main as background_main
+
+    src = make_91_percent_pdf(tmp_path / "ninety_one.pdf")
+    report_path = tmp_path / "r.json"
+
+    assert background_main([str(src), str(tmp_path / "out.pdf"), "--cover-limit", "95",
+                            "--report", str(report_path)]) == 0
+
+    import json
+    saved = json.loads(report_path.read_text(encoding="utf-8"))
+    assert row_for(saved, "/Im0")["action"] == "processed"

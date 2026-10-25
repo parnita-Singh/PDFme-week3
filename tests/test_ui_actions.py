@@ -70,6 +70,17 @@ def test_inspect_reports_an_unreadable_file(tmp_path):
     assert message.startswith("Could not read the file")
 
 
+def test_inspect_shows_how_much_of_the_page_each_image_covers(tmp_path):
+    src = make_mixed_pdf(tmp_path / "mixed.pdf")
+
+    rows, _ = inspect_file(str(src))
+
+    by_name = {row[1]: row for row in rows}
+    assert by_name["/Im0"][9] == "100%"       # full-page background
+    assert by_name["/Im1"][9] == "4%"         # 2 x 2 inch subject
+    assert by_name["/Im0"][8] == "8.5 x 11.0"  # placed size in inches
+
+
 # ---------------------------------------------------------------------------
 # Compress
 # ---------------------------------------------------------------------------
@@ -204,3 +215,44 @@ def test_pipeline_reports_an_impossible_limit_and_writes_nothing(tmp_path):
 
     assert out is None
     assert "No setting fits" in message or "stopped" in message.lower()
+
+
+def test_remove_images_processes_only_the_named_full_page_image(tmp_path):
+    from test_background import make_mixed_pdf
+    from pdftoolkit.ui_actions import remove_images_file
+
+    src = make_mixed_pdf(tmp_path / "mixed.pdf")
+
+    out, message = remove_images_file(str(src), "none", "1:Im0", None, tmp_path / "outputs")
+
+    assert out is not None and Path(out).exists()
+    assert message.startswith("Processed 1 image")
+
+
+def test_remove_images_asks_for_a_name_when_blank(tmp_path):
+    from pdftoolkit.ui_actions import remove_images_file
+
+    out, message = remove_images_file("unused.pdf", "none", "", None, tmp_path / "outputs")
+
+    assert out is None
+    assert "Choose at least one image" in message
+
+
+def test_image_choices_values_work_with_remove_images(tmp_path):
+    from pdftoolkit.ui_actions import image_choices, remove_images_file
+
+    src = make_mixed_pdf(tmp_path / "mixed.pdf")
+
+    choices = image_choices(str(src))
+
+    values = [value for _, value in choices]
+    assert values == ["1:Im0", "1:Im1"]
+    assert "covers 100%" in choices[0][0]
+    out, message = remove_images_file(str(src), "none", values[0], None, tmp_path / "outputs")
+    assert message.startswith("Processed 1 image")
+
+
+def test_image_choices_is_empty_without_a_file():
+    from pdftoolkit.ui_actions import image_choices
+
+    assert image_choices(None) == []

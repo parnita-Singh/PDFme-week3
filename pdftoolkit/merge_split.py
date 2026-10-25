@@ -236,8 +236,100 @@ def split_by_size(
     return report
 
 
+def parse_ranges(text: str | None, total_pages: int) -> list[list[int]]:
+    """'1-5, 6-10, 12' -> [[0..4], [5..9], [11]] as zero-based page indices, one list per part.
+
+    Pages are counted from 1. Raises ValueError with a message the page can show.
+    """
+    if text is None or not text.strip():
+        raise ValueError("Enter at least one page range, e.g. 1-5 or 1-5,6-10.")
+    groups: list[list[int]] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        first_text, dash, last_text = part.partition("-")
+        try:
+            first = int(first_text)
+            last = int(last_text) if dash else first
+        except ValueError:
+            raise ValueError(f"Cannot read '{part}'. Use numbers like 1-5 or 12.") from None
+        if dash and not last_text.strip():
+            raise ValueError(f"'{part}' is missing the last page. Use something like {first}-{first + 4}.")
+        if first < 1 or last > total_pages or first > last:
+            raise ValueError(f"'{part}' is outside the document, which has {total_pages} pages.")
+        groups.append(list(range(first - 1, last)))
+    if not groups:
+        raise ValueError("Enter at least one page range, e.g. 1-5 or 1-5,6-10.")
+    return groups
+
+
+def split_by_pages(
+    input_path: str | Path,
+    output_dir: str | Path,
+    ranges_text: str | None,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Write one PDF per page range, e.g. '1-5, 6-10, 12'. The input is not changed."""
+    input_path = Path(input_path)
+    output_dir = Path(output_dir)
+    if report_path is None:
+        report_path = output_dir / "split_report.json"
+
+    reader = PdfReader(str(input_path))
+    total_pages = len(reader.pages)
+    report: dict[str, Any] = {
+        "operation": "split_pages",
+        "input": str(input_path),
+        "output_dir": str(output_dir),
+        "ranges": ranges_text,
+        "input_bytes": input_path.stat().st_size,
+        "page_count": total_pages,
+        "parts": [],
+    }
+    try:
+        groups = parse_ranges(ranges_text, total_pages)
+    except ValueError as exc:
+        report.update(ok=False, message=str(exc))
+        write_report(report, report_path)
+        report["report_path"] = str(report_path)
+        return report
+
+    # Output names always start with the input's name plus "_partNN", so they can never be the input file.
+    names = [f"{input_path.stem}_part{n:02d}_p{_page_range(g)}.pdf" for n, g in enumerate(groups, start=1)]
+
+    with tempfile.TemporaryDirectory(prefix="pdfme_pages_") as tmp_name:
+        tmp = Path(tmp_name)
+        staged = []
+        for name, indices in zip(names, groups):
+            size = _write_atomic(_pages_writer(reader, indices), tmp / "parts" / name)
+            staged.append((tmp / "parts" / name, name, indices, size))
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for staged_path, name, indices, size in staged:
+            destination = output_dir / name
+            os.replace(staged_path, destination)
+            report["parts"].append({
+                "file": str(destination),
+                "pages": _page_range(indices),
+                "page_count": len(indices),
+                "bytes": size,
+            })
+
+    report["ok"] = True
+    lines = [f"Split {input_path.name} into {len(groups)} part(s) by page range:"]
+    lines += [
+        f"  {Path(p['file']).name}: pages {p['pages']} ({p['bytes'] / MB:.1f} MB)"
+        for p in report["parts"]
+    ]
+    report["message"] = "\n".join(lines)
+    write_report(report, report_path)
+    report["report_path"] = str(report_path)
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Merge PDFs, or split a PDF by size.")
+    parser = argparse.ArgumentParser(description="Merge PDFs, or split a PDF by size or page range.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_merge = sub.add_parser("merge", help="Concatenate PDFs in the order given")
@@ -248,12 +340,15 @@ def main(argv: list[str] | None = None) -> int:
     p_split = sub.add_parser("split", help="Split a PDF into parts under a size limit")
     p_split.add_argument("input_pdf")
     p_split.add_argument("--max-mb", type=float, default=2000)
+    p_split.add_argument("--pages", default=None, help="page ranges instead of size, e.g. 1-5,6-10,12")
     p_split.add_argument("-o", "--output-dir", required=True)
     p_split.add_argument("--report", default=None)
 
     args = parser.parse_args(argv)
     if args.command == "merge":
         report = merge(args.inputs, args.output, args.report)
+    elif args.pages:
+        report = split_by_pages(args.input_pdf, args.output_dir, args.pages, args.report)
     else:
         report = split_by_size(
             args.input_pdf, args.output_dir, int(args.max_mb * MB), args.report

@@ -14,12 +14,14 @@ from pdftoolkit.ui_actions import (
     INSPECT_HEADERS,
     LABEL_HEADERS,
     compress_file,
+    image_choices,
     inspect_file,
     labels_file,
     merge_files,
     pipeline_file,
     print_copy_file,
     remove_background_file,
+    remove_images_file,
     split_file,
 )
 
@@ -81,12 +83,15 @@ def build_app() -> gr.Blocks:
                           inputs=f_merge, outputs=[out_merge, m_merge])
             gr.Markdown("---")
             f_split = gr.File(label="PDF to split", file_types=[".pdf"], type="filepath")
-            split_mb = gr.Number(value=2000, label="Maximum part size (MB)")
+            split_mb = gr.Number(value=2000, label="Maximum part size (MB), for size split")
+            split_pages = gr.Textbox(value="", label="Page ranges (optional)",
+                                     info="Split by pages instead of size. Examples: 1-5,6-10,12. "
+                                          "If filled in, this is used and the size is ignored.")
             b_split = gr.Button("Split", variant="primary")
             out_split = gr.File(label="Parts", file_count="multiple")
             m_split = gr.Markdown()
-            b_split.click(lambda p, mb: _split(p, mb),
-                          inputs=[f_split, split_mb], outputs=[out_split, m_split])
+            b_split.click(lambda p, mb, pr: _split(p, mb, pr),
+                          inputs=[f_split, split_mb, split_pages], outputs=[out_split, m_split])
 
         with gr.Tab("Remove background"):
             f_bg = gr.File(label="PDF", file_types=[".pdf"], type="filepath")
@@ -96,14 +101,25 @@ def build_app() -> gr.Blocks:
             use_gemma = gr.Checkbox(value=False, label="Let Gemma choose the pages (needs Ollama running)")
             gemma_bg = gr.Textbox(value="gemma3:4b", label="Gemma model")
             model_file = gr.Textbox(value="", label="Model file (optional, for computers without internet)")
+            picks = gr.CheckboxGroup(choices=[], value=[], label="Images to process (optional)",
+                                     info="Add a PDF and this list fills in. Tick the image you want to process, "
+                                          "even one covering the whole page. Leave all unticked for the default rule.")
+            with gr.Accordion("Advanced: type image names", open=False):
+                images_box = gr.Textbox(value="", label="Image names",
+                                        info="Page and name, e.g. 1:X4 or 1:X4,2:X9. Same as the list above.")
+            cover_box = gr.Slider(50, 100, value=90, step=1,
+                                  label="Skip images covering this much of the page or more (%)",
+                                  info="Default 90. Raise it (for example 95) to process a photo that covers most "
+                                       "of the page. Named images ignore this.")
             b_bg = gr.Button("Remove background", variant="primary")
             out_bg = gr.File(label="Result")
             m_bg = gr.Markdown()
             b_bg.click(
-                lambda p, fi, pg, g, gm, mf: _bg(p, fi, pg, g, gm, mf),
-                inputs=[f_bg, fill, pages, use_gemma, gemma_bg, model_file],
+                lambda p, fi, pg, g, gm, mf, pk, im, cv: _bg(p, fi, pg, g, gm, mf, pk, im, cv),
+                inputs=[f_bg, fill, pages, use_gemma, gemma_bg, model_file, picks, images_box, cover_box],
                 outputs=[out_bg, m_bg],
             )
+            f_bg.change(lambda p: gr.update(choices=image_choices(p), value=[]), inputs=f_bg, outputs=picks)
 
         with gr.Tab("Page labels"):
             f_lab = gr.File(label="PDF", file_types=[".pdf"], type="filepath")
@@ -145,18 +161,22 @@ def _compress(path, mode, target, dpi, quality):
     return out, msg
 
 
-def _split(path, max_mb):
+def _split(path, max_mb, pages=""):
     if not path:
         return None, "Choose a PDF."
-    files, msg = split_file(path, float(max_mb or 0), OUTPUT_DIR)
+    files, msg = split_file(path, float(max_mb or 0), OUTPUT_DIR, pages or "")
     return files or None, msg
 
 
-def _bg(path, fill, pages, use_gemma, gemma_model, model_file):
+def _bg(path, fill, pages, use_gemma, gemma_model, model_file, picked=None, typed="", cover=90):
     if not path:
         return None, "Choose a PDF."
+    names = list(picked or []) + [part.strip() for part in (typed or "").split(",") if part.strip()]
+    if names:
+        return remove_images_file(path, fill or "none", ",".join(names), model_file or None, OUTPUT_DIR)
     out, msg = remove_background_file(path, fill or "none", pages or "", bool(use_gemma),
-                                      model_file or None, gemma_model or "gemma3:4b", OUTPUT_DIR)
+                                      model_file or None, gemma_model or "gemma3:4b", OUTPUT_DIR,
+                                      float(cover or 90))
     return out, msg
 
 
@@ -173,5 +193,21 @@ def _pipeline(path, remove_bg, fill, max_mb, model_file):
                          OUTPUT_DIR)
 
 
+def free_port(first: int = PORT, tries: int = 50) -> int:
+    """The first port from `first` that nothing is using. Avoids 'Cannot find empty port'."""
+    import socket
+
+    for port in range(first, first + tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind((HOST, port))
+            except OSError:
+                continue
+            return port
+    raise OSError(f"No free port found from {first} to {first + tries - 1}.")
+
+
 if __name__ == "__main__":
-    build_app().launch(server_name=HOST, server_port=PORT, inbrowser=True)
+    port = free_port()
+    print(f"PDFme is starting at http://{HOST}:{port}")
+    build_app().launch(server_name=HOST, server_port=port, inbrowser=True)

@@ -116,7 +116,7 @@ def _coverage(record, page_area: float) -> float | None:
     return best
 
 
-def _image_rows(records, boxes, selected, pages) -> list[dict[str, Any]]:
+def _image_rows(records, boxes, selected, pages, cover_limit: float = COVER_LIMIT) -> list[dict[str, Any]]:
     """One row per image record, with the decision and the reason. Eligible rows are marked."""
     rows: list[dict[str, Any]] = []
     for rec in records:
@@ -148,10 +148,12 @@ def _image_rows(records, boxes, selected, pages) -> list[dict[str, Any]]:
             row.update(action="not_processed", reason="page not selected")
         elif coverage is None:
             row.update(action="not_processed", reason="not drawn on a page")
-        elif selected is None and coverage >= COVER_LIMIT:
+        elif selected is None and coverage >= cover_limit:
             row.update(
                 action="not_processed",
-                reason=f"covers {coverage * 100:.0f}% of the page; the default rule is under 90%",
+                reason=(f"covers {coverage * 100:.0f}% of the page; the default rule skips images of "
+                        f"{cover_limit * 100:.0f}% or more. "
+                        f"To process it, name it: --images {rec.page_number}:{rec.image_name.lstrip('/')}"),
             )
         else:
             row["eligible"] = True
@@ -255,8 +257,12 @@ def remove_background(
     pages: Iterable[int] | None = None,
     model_file: str | Path | None = None,
     report_path: str | Path | None = None,
+    cover_limit: float = COVER_LIMIT,
 ) -> dict[str, Any]:
     """Remove backgrounds from selected images, or from the default selection.
+
+    cover_limit: the default rule skips images covering this share of the page or more (0.90 by default).
+    It does not apply to named images.
 
     selected_images: list of (page number, image name). If given, exactly these
     images are processed (the transparency check still applies).
@@ -274,7 +280,9 @@ def remove_background(
 
     records = inventory_pdf(input_path)
     boxes = page_media_boxes(input_path)
-    rows = _image_rows(records, boxes, selected, page_filter)
+    if not 0 < cover_limit <= 1:
+        raise ValueError("The cover limit must be between 1% and 100%.")
+    rows = _image_rows(records, boxes, selected, page_filter, cover_limit)
     warnings: list[str] = []
 
     if selected is not None:
@@ -371,6 +379,9 @@ def remove_background(
         + f"; {len(rows) - processed - errors} not processed; {len(vector)} vector background(s) "
         "listed and not processed."
     )
+    skipped = [f"page {r['page']} {r['image']}: {r['reason']}" for r in rows if r["action"] == "not_processed"]
+    if skipped:
+        message += " Why: " + " | ".join(skipped)
     report: dict[str, Any] = {
         "operation": "removebg",
         "ok": ok,
@@ -393,6 +404,25 @@ def remove_background(
     return report
 
 
+def parse_image_list(text: str | None) -> list[tuple[int, str]] | None:
+    """'1:Im0, 2:/Im1' -> [(1, '/Im0'), (2, '/Im1')]. Blank means none. The leading slash is optional."""
+    if text is None or not text.strip():
+        return None
+    result: list[tuple[int, str]] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" not in part:
+            raise ValueError(f"an image must look like page:name, e.g. 1:Im0 (got {part!r})")
+        page_text, name = part.split(":", 1)
+        name = name.strip()
+        if not name.startswith("/"):
+            name = "/" + name
+        result.append((int(page_text), name))
+    return result or None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Remove image backgrounds with rembg.")
     parser.add_argument("input_pdf")
@@ -402,6 +432,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--model-file", default=None, help="a local .onnx model file (for offline computers)")
     parser.add_argument("--report", default=None)
+    parser.add_argument("--images", default=None,
+                        help="process only these images, e.g. 1:Im0 or 1:Im0,2:Im1 (ignores the cover limit)")
+    parser.add_argument("--cover-limit", type=float, default=90,
+                        help="skip images covering this percent of the page or more (default 90)")
     args = parser.parse_args(argv)
 
     pages = None
@@ -413,8 +447,10 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model,
         fill=args.fill,
         pages=pages,
+        selected_images=parse_image_list(args.images),
         model_file=args.model_file,
         report_path=args.report,
+        cover_limit=args.cover_limit / 100,
     )
     sys.stdout.write(report["message"] + "\n")
     for row in report["images"]:

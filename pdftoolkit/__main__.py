@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     p_split = sub.add_parser("split", help="Split a PDF into parts under a size limit")
     p_split.add_argument("input_pdf")
     p_split.add_argument("--max-mb", type=float, default=2000)
+    p_split.add_argument("--pages", default=None, help="page ranges instead of size, e.g. 1-5,6-10,12")
     p_split.add_argument("-o", "--output-dir", required=True)
     p_split.add_argument("--report", default=None)
 
@@ -55,6 +56,9 @@ def main(argv: list[str] | None = None) -> int:
     p_bg.add_argument("--report", default=None)
     p_bg.add_argument("--classify", action="store_true", help="let Gemma (via Ollama) choose the pages")
     p_bg.add_argument("--gemma-model", default="gemma3:4b")
+    p_bg.add_argument("--images", default=None, help="process only these images, e.g. 1:Im0 or 1:Im0,2:Im1")
+    p_bg.add_argument("--cover-limit", type=float, default=90,
+                      help="skip images covering this percent of the page or more (default 90)")
 
     p_cls = sub.add_parser("classify", help="Label each page with Gemma (via Ollama). Changes nothing.")
     p_cls.add_argument("input_pdf")
@@ -150,9 +154,12 @@ def _cmd_merge(args: argparse.Namespace) -> int:
 
 
 def _cmd_split(args: argparse.Namespace) -> int:
-    from pdftoolkit.merge_split import MB, split_by_size
+    from pdftoolkit.merge_split import MB, split_by_pages, split_by_size
 
-    report = split_by_size(args.input_pdf, args.output_dir, int(args.max_mb * MB), args.report)
+    if args.pages:
+        report = split_by_pages(args.input_pdf, args.output_dir, args.pages, args.report)
+    else:
+        report = split_by_size(args.input_pdf, args.output_dir, int(args.max_mb * MB), args.report)
     sys.stdout.write(report["message"] + "\n")
     sys.stdout.write(f"report: {report['report_path']}\n")
     return 0 if report["ok"] else 1
@@ -186,6 +193,9 @@ def _cmd_removebg(args: argparse.Namespace) -> int:
         return 0 if report["ok"] else 1
 
     argv = [args.input_pdf, args.output_pdf, "--fill", args.fill, "--model", args.model]
+    if args.images:
+        argv += ["--images", args.images]
+    argv += ["--cover-limit", str(args.cover_limit)]
     if args.pages:
         argv += ["--pages", args.pages]
     if args.model_file:
