@@ -1,0 +1,13 @@
+PDFme report: compress
+Status: ok
+input: C:\Users\asus\Downloads\BIBB Standee_3x6 (1).pdf
+output: out\canva_300.pdf
+max_dpi: 300.0
+jpeg_quality: 90
+file bytes: 515886380 -> 284889797
+
+Images:
+  page 1 /Im0: unchanged; px [10800, 21600] -> [10800, 21600]; dpi 300.0 -> 300.0; bytes 30409285 -> 30409285
+  page 1 /Im1: unchanged; px [10800, 21600] -> [10800, 21600]; dpi 300.0 -> 300.0; bytes 2809861 -> 2809861
+  page 1 /Im2: unchanged; px [10800, 21600] -> [10800, 21600]; dpi 300.0 -> 300.0; bytes 2761382 -> 2761382
+  page 1 /Im3: unchanged; px [10800, 21600] -> [10800, 21600]; dpi 300.0 -> 300.0; bytes 2968413 -> 2968413
