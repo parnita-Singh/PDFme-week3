@@ -1,0 +1,3 @@
+-r requirements.txt
+rembg>=2.0
+onnxruntime>=1.17

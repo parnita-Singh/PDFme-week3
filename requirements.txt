@@ -1,4 +1,4 @@
-# Core and test dependencies, plus background removal (rembg and onnxruntime).
--r requirements.txt
-rembg>=2.0
-onnxruntime>=1.17
+pikepdf>=9.0
+pypdf>=5.0
+Pillow>=10.0
+pytest>=8.0

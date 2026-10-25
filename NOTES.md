@@ -36,3 +36,20 @@
 - Placements are matched by image object number, not by name. Forms drawn more than once record every placement. Self-drawing forms are skipped.
 - Inline images and images inside patterns are reported with a note and not rewritten.
 - The saved file is checked: if any image is still above max_dpi, a warning is added.
+
+- Each image object is rewritten once. Its target DPI is the highest effective DPI it is drawn at, so it fits every page it appears on.
+- Colour spaces are kept where possible: DeviceRGB/Gray/CMYK and ICCBased. Indexed (RGB base) is converted to RGB and recorded. Stencil masks, spot colours and other spaces are left unchanged and reported as not_rewritten.
+- /Decode and /DecodeParms are removed when an image is re-encoded, because the new pixels already have the decode applied.
+- The silent RGB fallback is removed. Failures are recorded as skipped, with a warning, and make ok false.
+- Soft masks are always written as new objects, so a mask shared with another image is never changed by accident.
+- Placements are matched by image object number, not by name. Forms drawn more than once record every placement. Self-drawing forms are skipped.
+- Inline images and images inside patterns are reported with a note and not rewritten.
+- The saved file is checked: if any image is still above max_dpi, a warning is added.
+- A separate print copy (`editing.py`) removes /PieceInfo from the page and the catalog. The original is never changed. The image bytes are kept identical. This is a separate step so that the default compression output still keeps the editing data.
+
+- Gemma labels pages, it does not edit them. Labels: banner_background, subject_photo, logo, text_page, keep_as_is. Background removal runs on subject_photo and logo pages only.
+- A reply that cannot be read, or a label outside the list, is recorded as keep_as_is with the reason, and nothing on that page changes.
+- If a Gemma call fails, the page is kept as is and the failure is in the report.
+- If Ollama is not running, the classifier is skipped with a message and the default background rule is used.
+- The page is rendered at about 1000 px wide and sent as a PNG, with temperature 0 so the answer is repeatable.
+- The model name is a setting (--gemma-model). Default: gemma3:4b.

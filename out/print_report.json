@@ -1,0 +1,12 @@
+{
+  "operation": "print_copy",
+  "ok": true,
+  "input": "C:\\Users\\asus\\Downloads\\BIBB Standee_3x6 (1).pdf",
+  "output": "C:\\Users\\asus\\PDFme\\out\\print.pdf",
+  "input_bytes": 515886380,
+  "output_bytes": 38999639,
+  "removed": [
+    "page 1 /PieceInfo"
+  ],
+  "page_count": 1
+}
