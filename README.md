@@ -227,3 +227,6 @@ Most commands write a JSON report next to their output, named after the output f
 - `NOTES.md` every decision made and why
 - `PROGRESS.md` the phase checklist and test results
 - `README.md` this file
+
+## IMPORTANT
+The AI models PDFme uses, including Gemma via Ollama and the background-removal model, are downloaded separately. They are not covered by this project’s license and follow their own terms of use.
